@@ -6,7 +6,7 @@ import Stripe from "stripe"
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 // placing user order for frontend
 const placeOrder = async (req, res) => {
-    const frontend_url = "http://localhost:5174"; // Use env variable for production
+    const frontend_url = process.env.FRONTEND_URL || "http://localhost:5174"; // Use env variable for production
     console.log("Received order request from user:", req.body);
 
     try {

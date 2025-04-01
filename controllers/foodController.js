@@ -1,59 +1,59 @@
 import foodModel from "../models/foodModel.js";
-import fs from 'fs'
+import cloudinary from "../config/cloudinary.js";
 
 // add food item
-
 const addFood = async (req, res) => {
+    let { name, description, price, category } = req.body;
+    let image_url = req.file.path; // Cloudinary URL
 
-    let image_filename = `${req.file.filename}`;
-    let { name, description, price, category } = req.body
     const food = new foodModel({
         name,
         description,
         price,
         category,
-        image: image_filename
+        image: image_url // Save Cloudinary URL in DB
     });
+
     try {
         await food.save();
-        res.json({
-            success: true,
-            message: "Food Added"
-        })
+        res.json({ success: true, message: "Food Added", image: image_url });
     } catch (error) {
         console.log(error);
-        res.json({
-            success: false,
-            message: "Error"
-        })
+        res.json({ success: false, message: "Error" });
     }
 }
 
 // all food list
 const listFood = async (req, res) => {
     try {
-        const foods=await foodModel.find({});
-        res.json({success:true,data:foods})
+        const foods = await foodModel.find({});
+        res.json({ success: true, data: foods });
     } catch (error) {
         console.log(error);
-        res.json({success:false,message:"Error"});
+        res.json({ success: false, message: "Error" });
     }
 }
 
 // remove food item
-const removeFood=async(req,res)=>{
+const removeFood = async (req, res) => {
     try {
-        const food=await foodModel.findById(req.body.id);
+        const food = await foodModel.findById(req.body.id);
+        if (!food) {
+            return res.json({ success: false, message: "Food item not found!" });
+        }
 
-        fs.unlink(`uploads/${food.image}`,()=>{})
+        // Cloudinary se image delete karo
+        const imagePublicId = food.image.split('/').pop().split('.')[0]; // Extract public_id
+        await cloudinary.uploader.destroy(`restaurant-uploads/${imagePublicId}`);
 
+        // DB se remove karo
         await foodModel.findByIdAndDelete(req.body.id);
-        res.json({success:true,data:"Food Removed"})
+        res.json({ success: true, message: "Food Removed" });
 
     } catch (error) {
         console.log(error);
-        res.json({success:false,message:"Error"});
+        res.json({ success: false, message: "Error" });
     }
 }
 
-export { addFood, listFood,removeFood}
+export { addFood, listFood, removeFood };
