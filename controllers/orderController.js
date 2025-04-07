@@ -71,7 +71,7 @@ const placeOrder = async (req, res) => {
 };
 
 const verifyOrder = async (req, res) => {
-    const { orderId, success } = req.body;
+    const { orderId, success } = req.query;
 
     if (!orderId) {
         return res.json({ success: false, message: "Order ID is missing" });
