@@ -2,76 +2,67 @@ import dotenv from 'dotenv';
 dotenv.config();
 import orderModel from "../models/orderModel.js";
 import userModel from "../models/userModel.js";
-import Stripe from "stripe"
+import Stripe from "stripe";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 // placing user order for frontend
 const placeOrder = async (req, res) => {
-    const frontend_url = process.env.FRONTEND_URL || "http://localhost:5173"; // Use env variable for production
+    const frontend_url = process.env.FRONTEND_URL || "http://localhost:5173";
     console.log("Received order request from user:", req.body);
 
     try {
-        // Create new order in the database
-        const newOrder = new orderModel({
-            userId: req.body.userId,
-            items: req.body.items,
-            amount: req.body.amount,
-            address: req.body.address
-        });
-
-        console.log("Saving new order:", newOrder);
-        await newOrder.save();
-
-        // Clear user cart data after order placement
-        await userModel.findByIdAndUpdate(req.body.userId, { cartData: {} });
-
         // Prepare line items for Stripe checkout
         const line_item = req.body.items.map((item) => ({
             price_data: {
-                currency: "nzd", // NZD as currency
+                currency: "nzd",
                 product_data: {
                     name: item.name
                 },
-                unit_amount: item.price * 100 * 1.74 // Adjust for conversion
+                unit_amount: item.price
             },
             quantity: item.quantity
         }));
 
-        console.log("Line items prepared for Stripe:", line_item);
 
-        // Add delivery charge
-        line_item.push({
-            price_data: {
-                currency: "nzd",
-                product_data: {
-                    name: "Delivery Charges"
-                },
-                unit_amount: 2 * 1.74 * 100 // Delivery charge in NZD, converted to cents
-            },
-            quantity: 1
-        });
-
-        console.log("Line items with delivery charge:", line_item);
-
-        // Create Stripe session
+        // 🔄 Create Stripe session FIRST
         const session = await stripe.checkout.sessions.create({
             line_items: line_item,
             mode: 'payment',
+            success_url: `${frontend_url}/verify?success=true&orderId=temp&token=${req.headers.token}`, // will replace orderId later
+            cancel_url: `${frontend_url}/verify?success=false&orderId=temp&token=${req.headers.token}`,
+        });
+
+        // ✅ Now create order and include session ID
+        const newOrder = new orderModel({
+            userId: req.body.userId,
+            items: req.body.items,
+            amount: req.body.amount,
+            sessionId: session.id // ✅ Added sessionId here
+        });
+
+        await newOrder.save();
+
+        // 🔄 Fix success/cancel URLs with real order ID
+        const updatedSession = await stripe.checkout.sessions.update(session.id, {
             success_url: `${frontend_url}/verify?success=true&orderId=${newOrder._id}&token=${req.headers.token}`,
             cancel_url: `${frontend_url}/verify?success=false&orderId=${newOrder._id}&token=${req.headers.token}`,
         });
 
-        console.log("Stripe session created successfully:", session);
+        // Clear user cart
+        await userModel.findByIdAndUpdate(req.body.userId, { cartData: {} });
 
-        // Return session URL to frontend
-        res.json({ success: true, session_url: session.url });
+        // Send updated session URL
+        res.json({ success: true, session_url: updatedSession.url });
+
     } catch (error) {
         console.error("Error placing order:", error);
         res.json({ success: false, message: error.message || "Error placing order." });
     }
 };
 
+// 🔄 VERIFY using sessionId from DB
 const verifyOrder = async (req, res) => {
-    const { orderId, success } = req.body; // ✅ body se data le
+    const { orderId } = req.body;
 
     if (!orderId) {
         return res.json({ success: false, message: "Order ID is missing" });
@@ -79,12 +70,15 @@ const verifyOrder = async (req, res) => {
 
     try {
         const order = await orderModel.findById(orderId);
-
-        if (!order) {
-            return res.json({ success: false, message: "Order not found" });
+        if (!order || !order.sessionId) {
+            return res.json({ success: false, message: "Order not found or sessionId missing" });
         }
 
-        if (success === "true") {
+        // ✅ Get actual session from Stripe
+        const session = await stripe.checkout.sessions.retrieve(order.sessionId);
+
+        // ✅ Check Stripe’s real payment status
+        if (session.payment_status === "paid") {
             await orderModel.findByIdAndUpdate(orderId, { payment: true });
             res.json({ success: true, message: "Payment Successful" });
         } else {
