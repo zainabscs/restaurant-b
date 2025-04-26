@@ -18,11 +18,13 @@ const placeOrder = async (req, res) => {
                 product_data: {
                     name: item.name
                 },
-                unit_amount: item.price
+                unit_amount: item.price * 100 // Convert dollars to cents
             },
             quantity: item.quantity
         }));
 
+        // Debug: Log line items
+        console.log("Line items for Stripe:", line_item);
 
         // 🔄 Create Stripe session FIRST
         const session = await stripe.checkout.sessions.create({
@@ -33,10 +35,16 @@ const placeOrder = async (req, res) => {
         });
 
         // ✅ Now create order and include session ID
+        const totalAmount = line_item.reduce((sum, item) => {
+            return sum + (item.price_data.unit_amount * item.quantity);
+        }, 0);
+
+        console.log("Total amount in cents:", totalAmount); // Debug total amount
+
         const newOrder = new orderModel({
             userId: req.body.userId,
             items: req.body.items,
-            amount: req.body.amount,
+            amount: totalAmount / 100, // Store in dollars
             sessionId: session.id // ✅ Added sessionId here
         });
 
